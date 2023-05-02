@@ -1,0 +1,168 @@
+#SPEED TEST PIPELINE
+Task Scheduler runs every 5 minutes, calls: "S:\Development\Bash-Shell\speedtest\run_json and store summary.bat"
+
+#==============================================
+#RUN_JSON_AND_STORE_SUMMARY.bat
+#==============================================
+S:
+
+cd S:\Development\Bash-Shell\speedtest
+
+set SAVESTAMP=%DATE:~0,2%_%DATE:~3,2%_%DATE:~6,4%@%TIME:~0,2%_%TIME:~3,2%_%TIME:~6,2%.00
+
+set SAVESTAMP=%SAVESTAMP: =0%.json
+
+speedtest --format=json > results\%SAVESTAMP%
+
+Powershell.exe -executionpolicy remotesigned -File  S:\Development\Bash-Shell\speedtest\Store-SpeedtestSummary.ps1 %SAVESTAMP%
+
+powershell.exe -executionpolicy remotesigned -File S:\Development\Bash-Shell\speedtest\Generate-CSV_PDF.ps1
+#==============================================
+
+
+#==============================================
+#Store-SpeedtestSummary.ps1
+#==============================================
+#GET FILENAME INPUT
+$file = $args[0];
+Write-Host $file;
+#$file = "12_04_2023@23_03_06.54";
+
+#GET RESULTS FOLDER\
+$folder = "S:\Development\Bash-Shell\speedtest\results\";
+
+#GENERATE FULL PATH
+$fullPath = ($folder + $file);
+
+#GET FILE DATA
+$fileData = Get-Content -Path $fullPath;
+#CONVERT TO JSON
+$json = ConvertFrom-Json $fileData;
+
+#Write-Output $json;
+#CHECK FOR ERROR
+if($null -ne $json.error){
+    #MAKE CSV LINE
+    $appendString = ($file + "," + $json.error + ",,");
+
+    Write-Output ("Writing: " + $appendString);
+    #APPEND TO CSV FILE
+    Add-Content -LiteralPath $summaryCSV -Value $appendString;
+
+}else{
+
+    #GET SUMMARY DATA
+    $timestamp = $json.timestamp;
+    $downloadMBPS = $json.download.bandwidth / 1E6 * 8;
+    $uploadMBPS = $json.upload.bandwidth / 1E6 * 8;
+    $resultUrl = $json.result.url;
+
+    #GET SUMMARY CSV PATH
+    $summaryCSV = "S:\Development\Bash-Shell\speedtest\summary\summary.csv";
+
+    #MAKE CSV LINE
+    $appendString = ($timestamp + "," + $downloadMBPS + "," + $uploadMBPS + "," + $resultUrl);
+
+    Write-Output ("Writing: " + $appendString);
+    #APPEND TO CSV FILE
+    Add-Content -LiteralPath $summaryCSV -Value $appendString;
+
+}
+
+#==============================================
+#Generate-CSV_PDF.ps1
+#==============================================
+function OpenExcelTo-Print(){
+
+	param(
+			$filePath
+	)
+	
+	Write-Output ("Getting from " + $filePath);
+	$file = Get-Item $filePath
+	$basePath = $filePath -replace "\.csv", "";
+	$ts = Get-Date -Format "yyyyMMdd_HHmmss";
+
+	#DEFINE A NEW OUTPUT PATH
+	$outpath = "S:\Development\Bash-Shell\speedtest\summary\pdf\";
+	$newfile = ($outpath + $ts + '.pdf');
+	Write-Output ("Writing to " + $newfile);
+
+	$excel = New-Object -ComObject Excel.Application
+	$excel.Visible = $true; # $false
+	$excel.displayAlerts = $true; # $false
+
+	$workbook = $excel.Workbooks.Open($filePath, 3);
+	
+	#LANDSCAPE
+	#$workbook.ActiveSheet.PageSetup.Orientation = 2;
+	
+	#OR SMALL
+	$workbook.ActiveSheet.Range("A:D").Font.Size = 8;
+	
+	#EXPORT AS PDF
+	$workbook.ExportAsFixedFormat($xlFixedFormat::xlTypePDF, $newfile)
+	#$excel.Print();
+	$workbook.Close($false);
+	$excel.Quit();
+	##[System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel)
+	#Remove-Variable excel
+	$excel = $null;
+}
+
+#GET SUMMARY CSV PATH
+$summaryCSV = "S:\Development\Bash-Shell\speedtest\summary\summary.csv";
+#PASS TO FUNCTION
+OpenExcelTo-Print $summaryCSV;
+
+#========================================================
+We now have a summary PDF and CSV file, ready to send.
+Graphs and download links available in htdocs
+#========================================================
+
+
+#==============================================
+#ouputCSV.php
+#==============================================
+<?php
+
+//GET THE LATEST PDF AS BASE64 AND RETURN
+
+header("Content-Type: text/csv");
+header("Content-Disposition: attachment; filename=summary.csv");
+
+//DEFINE FOLDER
+$summaryLink = "S:\Development\Bash-Shell\speedtest\summary\summary.csv";
+
+$summary = file_get_contents($summaryLink);
+$encoded = base64_decode($summary);
+
+echo $summary;
+
+
+#==============================================
+#outputPDF.php
+#==============================================
+<?php
+
+//GET THE LATEST PDF AS BASE64 AND RETURN
+//DEFINE FOLDER
+$summaryFolder = 'S:\Development\Bash-Shell\speedtest\summary\pdf';
+
+//GET THE FILES IN THIS FOLDER
+$summaryPDFs = preg_grep('~\.(pdf)$~', scandir($summaryFolder, SCANDIR_SORT_ASCENDING));
+$summaryPDF = end($summaryPDFs);
+$summaryLink = $summaryFolder . "/" . $summaryPDF;
+//echo $summaryLink;
+//die();
+
+$summary = file_get_contents($summaryLink);
+$encoded = base64_decode($summary);
+
+//header('Content-type:application/pdf; filename="' . $summaryPDF . '"');
+
+header("Content-type:application/pdf");
+header('Content-Disposition:attachment;filename="' . $summaryPDF . '"');
+
+echo $summary;
+#==================================================
